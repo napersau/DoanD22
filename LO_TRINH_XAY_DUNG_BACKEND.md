@@ -9,11 +9,11 @@
 
 ## ▶ TRẠNG THÁI HIỆN TẠI
 
-**Bước tiếp theo: `P0.2`** · Cập nhật lần cuối: 20/11/2026 (xong P0.1)
+**Bước tiếp theo: `P0.3`** · Cập nhật lần cuối: 21/11/2026 (xong P0.2)
 
 | Giai đoạn | Nội dung | Số bước | Trạng thái | Kết quả giai đoạn |
 | :---: | :--- | :---: | :---: | :--- |
-| **P0** | Nền móng: môi trường, khung Maven, lược đồ 52 bảng, dữ liệu demo, Docker hạ tầng | 5 | `[~]` 1/5 | P0.1 xong: 9 module build xanh, 8 test |
+| **P0** | Nền móng: môi trường, khung Maven, lược đồ 52 bảng, dữ liệu demo, Docker hạ tầng | 5 | `[~]` 2/5 | P0.1: 9 module build xanh, 8 test · P0.2: 52 bảng / 40 FK / 4 VIEW / 0 ENUM, nạp MySQL 8.0 không lỗi |
 | **P1** | `common-library`: API envelope, 49 mã lỗi, auto-config servlet, enum, 17 sự kiện, Outbox | 4 | `[ ]` | – |
 | **P2** | `service-registry` (Eureka) & `api-gateway` (JWT, 401/403, CORS) | 2 | `[ ]` | – |
 | **P3** | `auth-service`: đăng nhập, JWT, refresh xoay vòng, nhân sự, hồ sơ, API nội bộ | 5 | `[ ]` | – |
@@ -28,7 +28,7 @@
 | **P12** | `notification-service` (STOMP WebSocket, Email) | 2 | `[ ]` | – |
 | **P13** | Tích hợp & nghiệm thu: full Docker, dựng lại hàng đợi, E2E happy path + 20 ngoại lệ, đồng bộ FE | 5 | `[ ]` | – |
 
-**Tổng: 48 bước.** Tiến độ: 1/48.
+**Tổng: 48 bước.** Tiến độ: 2/48.
 
 ---
 
@@ -85,6 +85,8 @@ Xem `CLAUDE.md` §5. Mỗi bước dưới đây có thêm mục **Kiểm tra** 
 | **D-15** | Git: nhánh `develop`, mỗi bước một commit `be <bước>: …`, push `origin develop` sau mỗi bước, không `--force`. | Yêu cầu người dùng ghi trong `.claude/commands/v4-next.md` |
 | **D-16** | Tên starter theo phiên bản thật: `spring-boot-starter-webmvc` (Boot 4 đổi tên, docs ghi `spring-boot-starter-web`) và `spring-cloud-starter-gateway-server-webflux` (Spring Cloud 2025.x, docs ghi `spring-cloud-starter-gateway`). | Quy chuẩn 11.1, Task 1.5.1 viết theo tên cũ (P0.1) |
 | **D-17** | Starter chỉ được thêm vào service ở bước cấu hình nó (JPA + MySQL ở bước tầng dữ liệu, Security ở P1.2, AMQP ở P1.4, OpenFeign + Resilience4j ở bước có Feign client, Redis ở P4.1 / P6.1, WebSocket + Mail ở P12) — thêm sớm mà chưa cấu hình thì ứng dụng không khởi động được. | P0.1 |
+| **D-18** | VIEW giá hiện hành (`v_current_service_prices`, `v_current_medicine_prices`) so sánh `effective_from/to` (DATETIME giờ phòng khám) với `DATE_ADD(UTC_TIMESTAMP(), INTERVAL 7 HOUR)` thay vì `NOW()`, để kết quả không phụ thuộc múi giờ phiên MySQL (server chạy +00:00; Việt Nam không có giờ mùa hè). Cột VIEW docs không quy định → chọn: `v_service_invoice_amounts` (`invoice_id, invoice_code, visit_service_detail_id, visit_id, service_id, category_code, quantity, unit_price, vat_rate, discount_amount, payment_status, amount_before_vat, vat_amount, gross_amount, payable_amount`), `v_medicine_invoice_amounts` (tương tự, kèm `prescription_id`), hai VIEW giá kèm `code, name, category_id, is_active`; mọi số tiền `ROUND(…, 2)`. | Task 1.2 bước 3 (`SELECT code, price FROM v_current_service_prices`), ERD mục 6 (P0.2) |
+| **D-19** | `db/schema_current.sql` ghi chú cột bằng `COMMENT` MySQL ở các cột trạng thái / khóa ngoại logic (`LFK: <csdl>.<bảng>(id)`); đặt tên ràng buộc `uk_*`, `idx_*`, `fk_*`, `chk_*` (tên `idx_visits_doctor_status`, `idx_appointments_slot` theo docs; các tên còn lại tự đặt). Có thêm vài index hỗ trợ khóa ngoại ngoài mục 5 của ERD (ví dụ `user_roles(role_id)`, `lab_test_results(lab_test_item_id)`). | ERD mục 5 liệt kê index có chủ đích, không liệt kê tên (P0.2) |
 
 ---
 
@@ -124,11 +126,11 @@ Xem `CLAUDE.md` §5. Mỗi bước dưới đây có thêm mục **Kiểm tra** 
 - **Kiểm tra:** `mvn -q clean verify` → BUILD SUCCESS cả 9 module.
 - **Kết quả (20/11/2026):** Đã tạo nhánh `develop`. `mvn -q clean verify` BUILD SUCCESS (JDK 22, `release 21`), ra 9 jar. **8 test `contextLoads`** (8 module ứng dụng): 8 pass, 0 fail, 0 skip; Gateway khởi động dạng reactive, Eureka Server khởi động với cổng ngẫu nhiên. `common-library` là jar thường (chỉ có `package-info`, các phụ thuộc webmvc / security / openfeign để `optional`). Chưa có e2e (bước chưa có service chạy trong Docker). `pom.xml` cha: thêm module `reporting-service`, `maven.compiler.release=21`, `pluginManagement` cho `spring-boot-maven-plugin` (loại Lombok khỏi jar). Lệch docs: D-16, D-17. `.gitignore` sẵn có đã đủ (`target/`, IDE).
 
-#### [ ] P0.2 — Lược đồ v4.0: `db/schema_current.sql` (52 bảng, 40 khóa ngoại, 4 VIEW)
+#### [x] P0.2 — Lược đồ v4.0: `db/schema_current.sql` (52 bảng, 40 khóa ngoại, 4 VIEW)
 - **Tham chiếu:** ERD mục 1.2, 2, 4, 5, 6; Enum mục C; Kiến trúc 4.1; D-02.
 - **Làm:** tạo 5 CSDL `utf8mb4_unicode_ci`; viết đủ 52 bảng đúng từng cột / kiểu / NULL / DEFAULT / UNIQUE / CHECK của từ điển dữ liệu; 40 khóa ngoại nội bộ (auth 7, appointment 1, clinical 24, billing 8, reporting 0) với `ON DELETE CASCADE` đúng chỗ; index mục 5 (tên `idx_…`); khóa ngoại logic ghi chú `-- LFK: db.bảng(id)`; 4 VIEW `v_service_invoice_amounts` (kèm `category_code`), `v_current_service_prices`, `v_medicine_invoice_amounts`, `v_current_medicine_prices`. Không có dữ liệu.
 - **Kiểm tra:** nạp vào MySQL 8 tạm (Docker) → các truy vấn Task 1.2 bước 2: auth 9 · appointment 4 · clinical 24 + 2 VIEW · billing 10 + 2 VIEW · reporting 5; `fk_count = 40`; 0 cột `enum`.
-- **Kết quả:** –
+- **Kết quả (21/11/2026):** `db/schema_current.sql` (5 CSDL, 52 bảng, 40 khóa ngoại, 4 VIEW), nạp bằng đúng cơ chế initdb vào `mysql:8.0` (8.0.46, `--default-time-zone=+00:00`) **không lỗi**. Số đếm bằng `db/verify_schema.sql` (file mới, P0.5 dùng lại): auth 9 · appointment 4 · clinical 24 + 2 VIEW · billing 10 + 2 VIEW · reporting 5 → **52 bảng, 4 VIEW**; khóa ngoại **1 / 7 / 8 / 24 = 40** (reporting 0); **0 cột ENUM**. Thử hành vi bằng dữ liệu giả rồi `ROLLBACK` (kịch bản tạm, không lưu): `v_current_service_prices` chỉ trả dòng giá đang hiệu lực (100000.00, bỏ dòng giá cũ đã đóng); `v_service_invoice_amounts` 2 × 250000 × 1.10 − 30000 = 520000.00; `v_medicine_invoice_amounts` 10 × 15000 × 1.05 = 157500.00, hóa đơn chưa có dòng ra 0.00 (không NULL); CHECK chặn giá âm / tồn âm (3819), UNIQUE `prescription_id` (1062), khóa ngoại vật lý (1452); `UPDATE … WHERE quantity_on_hand >= :qty` trừ 300 khi tồn 200 → 0 dòng bị đổi. Bất biến `quantity_on_hand = SUM(inventory_transactions.quantity)` **không có ràng buộc ở CSDL** — do ứng dụng giữ bằng giao dịch (P8.2, P10.2); kiểm bằng dữ liệu seed ở P0.3. `mvn -q clean verify` vẫn xanh (8 test, 0 fail). Chưa có e2e (bước chưa có service chạy). Image `mysql:8.0` đã tải về máy, container tạm đã xóa. Lệch docs: D-18, D-19. `docs/schema_init.sql` chưa đồng bộ (làm ở P0.5, D-02).
 
 #### [ ] P0.3 — Dữ liệu danh mục khởi tạo trong lược đồ
 - **Tham chiếu:** Task 1.2.2; Enum mục B (L1–L4); D-03, D-04.
@@ -516,3 +518,4 @@ Xem `CLAUDE.md` §5. Mỗi bước dưới đây có thêm mục **Kiểm tra** 
 | :--- | :--- |
 | 20/11/2026 | Tạo lộ trình từ bộ tài liệu v4.0: 14 giai đoạn, 48 bước, quyết định D-01 → D-15, bảng lệch hợp đồng FE. |
 | 20/11/2026 | Xong P0.1; thêm D-16 (tên starter Boot 4 / Cloud 2025), D-17 (starter thêm theo bước cấu hình). |
+| 21/11/2026 | Xong P0.2 (lược đồ 52 bảng); thêm D-18 (VIEW giá theo giờ UTC+7, cột VIEW), D-19 (đặt tên ràng buộc); thêm `db/verify_schema.sql`. |
