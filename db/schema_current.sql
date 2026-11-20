@@ -940,4 +940,164 @@ CREATE TABLE processed_events (
     PRIMARY KEY (event_id, consumer)
 ) ENGINE = InnoDB COMMENT = 'Sự kiện đã xử lý (chống xử lý trùng)';
 
--- (Dữ liệu danh mục khởi tạo: thêm ở bước P0.3)
+
+-- =====================================================================================================================
+-- 6. DỮ LIỆU DANH MỤC KHỞI TẠO (bước P0.3) — luôn có trong mọi môi trường, kể cả khi không nạp dữ liệu demo
+--    Nguồn: Enum mục B (L1-L4), Lịch trình Task 1.2.2 / 3.1 / 4.1, Nghiệp vụ mục 22. Giá trị docs không nêu: xem D-03, D-20, D-21.
+--    UUID cố định: admin 019a9442-d800-…; dịch vụ 019a9442-d830-7000-8000-00000000000N; thuốc 019a9442-d870-7000-8000-00000000000N.
+--    Thứ tự INSERT quyết định id SMALLINT của danh mục (ví dụ lab_test_items: WBC=1, RBC=2, HGB=3, PLT=4 — Task 3.5 dùng id này).
+-- =====================================================================================================================
+
+-- ---- 6.1 auth: 6 vai trò + tài khoản quản trị (admin / Admin@123) ---------------------------------------------------
+USE pet_clinic_auth_db;
+
+INSERT INTO roles (code, name, description, is_system, is_active) VALUES
+    ('ADMIN',              'Quản trị viên',                       'Cấu hình danh mục, bảng giá, quản lý người dùng, xem báo cáo', TRUE, TRUE),
+    ('VETERINARIAN',       'Bác sĩ thú y',                        'Khám lâm sàng, chỉ định cận lâm sàng, chẩn đoán, kê đơn; bắt buộc có hồ sơ chuyên môn', TRUE, TRUE),
+    ('RECEPTIONIST',       'Lễ tân / Thu ngân',                   'Tiếp đón, phân công Bác sĩ, thu phí khám / cận lâm sàng, thu tiền cuối ca, bán thuốc', TRUE, TRUE),
+    ('LAB_TECHNICIAN',     'Bác sĩ / KTV Xét nghiệm',             'Nhận mẫu, nhập kết quả xét nghiệm', TRUE, TRUE),
+    ('IMAGING_TECHNICIAN', 'Bác sĩ / KTV Chẩn đoán hình ảnh',     'Siêu âm, X-quang, tải ảnh, kết luận', TRUE, TRUE),
+    ('PET_OWNER',          'Chủ thú cưng',                        'Đặt lịch, xem bệnh án, đơn thuốc; có hồ sơ khách hàng', TRUE, TRUE);
+
+SET @u_admin = UUID_TO_BIN('019a9442-d800-7729-87cc-fbb1ceda8817');
+
+-- password_hash = BCrypt (cost 10, tiền tố $2a$) của 'Admin@123'; đã đối chiếu bằng BCryptPasswordEncoder của Spring Security 7
+INSERT INTO users (id, username, password_hash, status)
+VALUES (@u_admin, 'admin', '$2a$10$duivQZ2E03xzQXbSITHw0.bPQ1FkB5SZ45tej2.7QnDvwwC7QZq3O', 'ACTIVE');
+
+INSERT INTO user_roles (user_id, role_id) SELECT @u_admin, id FROM roles WHERE code = 'ADMIN';
+
+INSERT INTO user_profiles (user_id, full_name, phone_number, email)
+VALUES (@u_admin, 'Quản trị hệ thống', '0902000001', 'admin@pawcare.vn');
+
+INSERT INTO staff_profiles (user_id, employee_code, position_title, department, employment_type, hire_date)
+VALUES (@u_admin, 'NV0001', 'Quản trị viên', 'Quản trị', 'FULL_TIME', '2026-01-01');
+
+-- ---- 6.2 clinical: loài, nhóm dịch vụ, dịch vụ + giá, chỉ số xét nghiệm, khoảng tham chiếu, gói CBC -------------------
+USE pet_clinic_clinical_db;
+
+INSERT INTO species (code, name, description, is_active) VALUES
+    ('DOG', 'Chó', NULL, TRUE),
+    ('CAT', 'Mèo', NULL, TRUE);
+
+-- queue_type / requires_prepayment đúng bảng Enum mục L2 (thu trước + hàng đợi: khám, xét nghiệm, CĐHA; còn lại làm tại phòng, thu khi chốt ca)
+INSERT INTO service_categories (code, name, queue_type, requires_prepayment, display_order, is_active) VALUES
+    ('EXAMINATION',        'Khám bệnh',                  'DOCTOR',     TRUE,  1, TRUE),
+    ('VACCINATION',        'Tiêm phòng',                 NULL,         FALSE, 2, TRUE),
+    ('DEWORMING',          'Tẩy giun',                   NULL,         FALSE, 3, TRUE),
+    ('EXTERNAL_PARASITE',  'Trị ký sinh trùng ngoài da', NULL,         FALSE, 4, TRUE),
+    ('INJECTION_INFUSION', 'Tiêm, truyền dịch',          NULL,         FALSE, 5, TRUE),
+    ('LABORATORY',         'Xét nghiệm',                 'LABORATORY', TRUE,  6, TRUE),
+    ('IMAGING',            'Chẩn đoán hình ảnh',         'IMAGING',    TRUE,  7, TRUE),
+    ('SURGERY',            'Phẫu thuật',                 NULL,         FALSE, 8, TRUE),
+    ('PROCEDURE',          'Thủ thuật',                  NULL,         FALSE, 9, TRUE);
+
+SET @s_exam     = UUID_TO_BIN('019a9442-d830-7000-8000-000000000001');
+SET @s_vaccine  = UUID_TO_BIN('019a9442-d830-7000-8000-000000000002');
+SET @s_deworm   = UUID_TO_BIN('019a9442-d830-7000-8000-000000000003');
+SET @s_infusion = UUID_TO_BIN('019a9442-d830-7000-8000-000000000004');
+SET @s_cbc      = UUID_TO_BIN('019a9442-d830-7000-8000-000000000005');
+SET @s_us       = UUID_TO_BIN('019a9442-d830-7000-8000-000000000006');
+SET @s_xray     = UUID_TO_BIN('019a9442-d830-7000-8000-000000000007');
+
+INSERT INTO services (id, category_id, code, name, description, unit, estimated_minutes, preparation_notes)
+SELECT v.id, c.id, v.code, v.name, v.description, v.unit, v.minutes, v.prep
+FROM (SELECT @s_exam AS id, 'EXAMINATION' AS cat, 'EXAM_GEN' AS code, 'Khám tổng quát' AS name,
+             'Khám lâm sàng tổng quát; phí khám thu ngay khi tiếp đón' AS description, 'Lần' AS unit, 20 AS minutes, NULL AS prep
+      UNION ALL SELECT @s_vaccine,  'VACCINATION',        'VACCINE_7IN1', 'Tiêm vaccine 7 bệnh',  'Giá trọn gói gồm khám sàng lọc và liều vaccine dùng tại chỗ', 'Mũi', 10, 'Thú cưng khỏe mạnh, không sốt, không tiêu chảy'
+      UNION ALL SELECT @s_deworm,   'DEWORMING',          'DEWORM',       'Tẩy giun',              'Giá trọn gói gồm viên thuốc cho uống tại chỗ',                'Lần', 5,  NULL
+      UNION ALL SELECT @s_infusion, 'INJECTION_INFUSION', 'INFUSION',     'Truyền dịch',           'Gồm công đặt catheter, chai dịch và dây truyền',              'Lần', 60, NULL
+      UNION ALL SELECT @s_cbc,      'LABORATORY',         'LAB_CBC',      'Xét nghiệm CBC (tổng phân tích tế bào máu)', 'Gói gồm các chỉ số WBC, RBC, HGB, PLT', 'Lần', 30, NULL
+      UNION ALL SELECT @s_us,       'IMAGING',            'IMG_US',       'Siêu âm bụng',          'Siêu âm ổ bụng, có mô tả và kết luận',                        'Lần', 20, 'Nhịn ăn 8 giờ trước khi siêu âm'
+      UNION ALL SELECT @s_xray,     'IMAGING',            'IMG_XRAY',     'X-quang',               'Chụp X-quang, tải ảnh kèm mô tả và kết luận',                 'Lần', 15, NULL) v
+         JOIN service_categories c ON c.code = v.cat;
+
+-- Bảng giá khởi tạo: hiệu lực từ 01/01/2026, đang mở (effective_to = NULL). Người lập: admin.
+INSERT INTO service_prices (service_id, price, vat_rate, effective_from, effective_to, change_reason, created_by) VALUES
+    (@s_exam,     100000.00, 0.00, '2026-01-01 00:00:00', NULL, 'Giá khởi tạo', @u_admin),
+    (@s_vaccine,  280000.00, 0.00, '2026-01-01 00:00:00', NULL, 'Giá khởi tạo', @u_admin),
+    (@s_deworm,    50000.00, 0.00, '2026-01-01 00:00:00', NULL, 'Giá khởi tạo', @u_admin),
+    (@s_infusion, 150000.00, 0.00, '2026-01-01 00:00:00', NULL, 'Giá khởi tạo', @u_admin),
+    (@s_cbc,      250000.00, 0.00, '2026-01-01 00:00:00', NULL, 'Giá khởi tạo', @u_admin),
+    (@s_us,       200000.00, 0.00, '2026-01-01 00:00:00', NULL, 'Giá khởi tạo', @u_admin),
+    (@s_xray,     180000.00, 0.00, '2026-01-01 00:00:00', NULL, 'Giá khởi tạo', @u_admin);
+
+-- Thứ tự quyết định id: WBC=1, RBC=2, HGB=3, PLT=4
+INSERT INTO lab_test_items (code, name, unit, description, is_active) VALUES
+    ('WBC', 'Bạch cầu',      '10^9/L', 'Số lượng bạch cầu; tăng gặp trong viêm, nhiễm khuẩn', TRUE),
+    ('RBC', 'Hồng cầu',      '10^12/L', 'Số lượng hồng cầu; giảm gặp trong thiếu máu',        TRUE),
+    ('HGB', 'Huyết sắc tố',  'g/dL',   'Nồng độ huyết sắc tố; phản ánh khả năng vận chuyển oxy', TRUE),
+    ('PLT', 'Tiểu cầu',      '10^9/L', 'Số lượng tiểu cầu; giảm gặp trong rối loạn đông máu',  TRUE);
+
+INSERT INTO lab_test_reference_ranges (lab_test_item_id, species_id, min_value, max_value)
+SELECT i.id, sp.id, v.min_value, v.max_value
+FROM (SELECT 'WBC' AS item, 'DOG' AS species, 6.00 AS min_value, 17.00 AS max_value
+      UNION ALL SELECT 'WBC', 'CAT',   5.50,  19.50
+      UNION ALL SELECT 'RBC', 'DOG',   5.50,   8.50
+      UNION ALL SELECT 'RBC', 'CAT',   5.00,  10.00
+      UNION ALL SELECT 'HGB', 'DOG',  12.00,  18.00
+      UNION ALL SELECT 'HGB', 'CAT',   8.00,  15.00
+      UNION ALL SELECT 'PLT', 'DOG', 200.00, 500.00
+      UNION ALL SELECT 'PLT', 'CAT', 300.00, 700.00) v
+         JOIN lab_test_items i ON i.code = v.item
+         JOIN species sp ON sp.code = v.species;
+
+INSERT INTO service_lab_test_items (service_id, lab_test_item_id) SELECT @s_cbc, id FROM lab_test_items;
+
+-- ---- 6.3 billing-pharmacy: nhóm thuốc, 4 thuốc + thành phần + giá + tồn kho + nhập kho đầu kỳ -------------------------
+USE pet_clinic_billing_pharmacy_db;
+
+INSERT INTO medicine_categories (code, name, is_active) VALUES
+    ('ANTIBIOTIC',    'Kháng sinh',            TRUE),
+    ('VACCINE',       'Vắc-xin',               TRUE),
+    ('ANTIPARASITIC', 'Thuốc ký sinh trùng',   TRUE),
+    ('SUPPLEMENT',    'Thực phẩm bổ sung',     TRUE);
+
+SET @m_amox    = UUID_TO_BIN('019a9442-d870-7000-8000-000000000001');
+SET @m_drontal = UUID_TO_BIN('019a9442-d870-7000-8000-000000000002');
+SET @m_vaccine = UUID_TO_BIN('019a9442-d870-7000-8000-000000000003');
+SET @m_gel     = UUID_TO_BIN('019a9442-d870-7000-8000-000000000004');
+
+INSERT INTO medicines (id, category_id, code, name, dosage_form, strength, base_unit, packaging_spec, manufacturer,
+                       country_of_origin, storage_conditions, requires_prescription, min_stock_alert)
+SELECT v.id, c.id, v.code, v.name, v.dosage_form, v.strength, v.base_unit, v.packaging_spec, v.manufacturer,
+       v.country, v.storage, v.requires_prescription, v.min_stock_alert
+FROM (SELECT @m_amox AS id, 'ANTIBIOTIC' AS cat, 'AMOX_CLAV_250' AS code, 'Clavamox 250mg' AS name,
+             'Viên nén bao phim' AS dosage_form, '250mg' AS strength, 'Viên' AS base_unit,
+             'Hộp 10 vỉ x 10 viên' AS packaging_spec, 'Zoetis' AS manufacturer, 'Ý' AS country,
+             'Nơi khô ráo, dưới 25°C' AS storage, TRUE AS requires_prescription, 10 AS min_stock_alert
+      UNION ALL SELECT @m_drontal, 'ANTIPARASITIC', 'DRONTAL_PLUS', 'Drontal Plus', 'Viên nén', NULL, 'Viên',
+             'Hộp 2 vỉ x 6 viên', 'Elanco', 'Đức', 'Nơi khô ráo, dưới 25°C', TRUE, 10
+      UNION ALL SELECT @m_vaccine, 'VACCINE', 'NOBIVAC_DHPPI', 'Nobivac DHPPi', 'Bột đông khô pha tiêm', NULL, 'Liều',
+             'Hộp 10 lọ x 1 liều', 'MSD Animal Health', 'Hà Lan', 'Bảo quản lạnh 2-8°C, tránh ánh sáng', TRUE, 5
+      UNION ALL SELECT @m_gel, 'SUPPLEMENT', 'NUTRI_PLUS_GEL', 'Nutri-Plus Gel', 'Gel uống', NULL, 'Tuýp',
+             'Tuýp 120,5 g', 'Virbac', 'Pháp', 'Nơi khô ráo, dưới 30°C', FALSE, 10) v
+         JOIN medicine_categories c ON c.code = v.cat;
+
+INSERT INTO medicine_ingredients (medicine_id, ingredient_name, strength_value, strength_unit) VALUES
+    (@m_amox,    'Amoxicillin',        200.000, 'mg'),
+    (@m_amox,    'Clavulanic acid',     50.000, 'mg'),
+    (@m_drontal, 'Praziquantel',        50.000, 'mg'),
+    (@m_drontal, 'Pyrantel pamoate',   144.000, 'mg'),
+    (@m_drontal, 'Febantel',           150.000, 'mg'),
+    (@m_vaccine, 'Virus Carré sống giảm độc lực (CDV)',           NULL, NULL),
+    (@m_vaccine, 'Adenovirus chó type 2 sống giảm độc lực (CAV-2)', NULL, NULL),
+    (@m_vaccine, 'Parvovirus chó sống giảm độc lực (CPV)',        NULL, NULL),
+    (@m_vaccine, 'Virus á cúm chó sống giảm độc lực (CPiV)',      NULL, NULL),
+    (@m_gel,     'Taurine',             50.000, 'mg');
+
+INSERT INTO medicine_prices (medicine_id, sale_price, vat_rate, effective_from, effective_to, change_reason, created_by) VALUES
+    (@m_amox,     15000.00, 0.05, '2026-01-01 00:00:00', NULL, 'Giá khởi tạo', @u_admin),
+    (@m_drontal,  35000.00, 0.05, '2026-01-01 00:00:00', NULL, 'Giá khởi tạo', @u_admin),
+    (@m_vaccine, 165000.00, 0.05, '2026-01-01 00:00:00', NULL, 'Giá khởi tạo', @u_admin),
+    (@m_gel,      95000.00, 0.05, '2026-01-01 00:00:00', NULL, 'Giá khởi tạo', @u_admin);
+
+-- Tồn kho đầu kỳ 200 / 50 / 40 / 100; bất biến quantity_on_hand = SUM(inventory_transactions.quantity) (ứng dụng giữ, không có ràng buộc CSDL)
+INSERT INTO medicine_stocks (medicine_id, quantity_on_hand) VALUES
+    (@m_amox, 200), (@m_drontal, 50), (@m_vaccine, 40), (@m_gel, 100);
+
+INSERT INTO inventory_transactions (medicine_id, transaction_type, quantity, unit_cost, notes, created_by) VALUES
+    (@m_amox,    'IMPORT', 200,   9000.00, 'Nhập kho đầu kỳ', @u_admin),
+    (@m_drontal, 'IMPORT',  50,  20000.00, 'Nhập kho đầu kỳ', @u_admin),
+    (@m_vaccine, 'IMPORT',  40, 120000.00, 'Nhập kho đầu kỳ', @u_admin),
+    (@m_gel,     'IMPORT', 100,  60000.00, 'Nhập kho đầu kỳ', @u_admin);
